@@ -5,7 +5,7 @@ set -euo pipefail
 source ./config.env
 
 USER=${1:-$DEFAULT_USER}
-RSA_PATH=${2:-"$HOME/.ssh/id_rsa"}
+RSA_PATH=${2:-"$DEFAULT_RSA_PATH"}
 SERVER_PORT=${3:-$DEFAULT_SERVER_PORT}
 RSA_PATH="${RSA_PATH%$'\r'}"
 SSH_OPTS='-oIdentitiesOnly=yes -oHostKeyAlgorithms=+ssh-rsa -oPubkeyAcceptedAlgorithms=+ssh-rsa'

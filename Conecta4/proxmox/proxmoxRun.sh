@@ -14,21 +14,32 @@ echo "Server port: $SERVER_PORT"
 JAR_NAME="server-package.jar"
 JAR_PATH="./target/$JAR_NAME"
 
-cd ..
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$SCRIPT_DIR"
 
 if [[ ! -f "$RSA_PATH" ]]; then
     echo "Error: No s'ha trobat el fitxer de clau privada: $RSA_PATH"
-    cd proxmox
     exit 1
 fi
 
 echo "Generant el fitxer JAR..."
-rm -f "$JAR_PATH"
-./run.sh com.server.Main build
+rm -f "$PROJECT_ROOT/target/$JAR_NAME"
+cd "$PROJECT_ROOT"
 
-if [[ ! -f "$JAR_PATH" ]]; then
-    echo "Error: No s'ha trobat l'arxiu JAR: $JAR_PATH"
-    cd proxmox
+# Build con Maven
+if [[ -f "pom.xml" ]]; then
+    echo "Compilant amb Maven..."
+    mvn clean package -DskipTests -q
+elif [[ -f "build.gradle" ]] || [[ -f "build.gradle.kts" ]]; then
+    echo "Compilant amb Gradle..."
+    ./gradlew clean build -x test -q
+else
+    echo "Error: No s'ha trobat pom.xml ni build.gradle"
+    exit 1
+fi
+
+if [[ ! -f "$PROJECT_ROOT/target/$JAR_NAME" ]]; then
+    echo "Error: No s'ha trobat l'arxiu JAR: $PROJECT_ROOT/target/$JAR_NAME"
     exit 1
 fi
 
@@ -44,7 +55,6 @@ scp -P 20127 $SSH_OPTS "$JAR_PATH" "$USER@ieticloudpro.ieti.cat:~/"
 if [[ $? -ne 0 ]]; then
     echo "Error durant l'enviament SCP"
     ssh-agent -k
-    cd proxmox
     exit 1
 fi
 
@@ -95,4 +105,3 @@ ssh -t -p 20127 $SSH_OPTS "$USER@ieticloudpro.ieti.cat" << EOF
 EOF
 
 ssh-agent -k
-cd proxmox
