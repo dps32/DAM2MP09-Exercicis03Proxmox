@@ -11,36 +11,43 @@ echo "User: $USER"
 echo "Ruta RSA: $RSA_PATH"
 echo "Server port: $SERVER_PORT"
 
-JAR_NAME="server-package.jar"
-JAR_PATH="./target/$JAR_NAME"
 
+
+# Ajustar rutas para buscar pom.xml en el directorio padre
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$SCRIPT_DIR"
+PROJECT_ROOT="$SCRIPT_DIR/.."
+
+# Buscar automáticamente el JAR generado más reciente en target/
+JAR_PATH=$(ls -1t "$PROJECT_ROOT/target/"*.jar 2>/dev/null | head -n 1)
+JAR_NAME=$(basename "$JAR_PATH")
+
 
 if [[ ! -f "$RSA_PATH" ]]; then
-    echo "Error: No s'ha trobat el fitxer de clau privada: $RSA_PATH"
-    exit 1
+  echo "Error: No s'ha trobat el fitxer de clau privada: $RSA_PATH"
+  exit 1
 fi
 
 echo "Generant el fitxer JAR..."
-rm -f "$PROJECT_ROOT/target/$JAR_NAME"
 cd "$PROJECT_ROOT"
 
-# Build con Maven
+# Build con Maven o Gradle en el directorio padre
 if [[ -f "pom.xml" ]]; then
-    echo "Compilant amb Maven..."
-    mvn clean package -DskipTests -q
+  echo "Compilant amb Maven..."
+  mvn clean package -DskipTests -q
 elif [[ -f "build.gradle" ]] || [[ -f "build.gradle.kts" ]]; then
-    echo "Compilant amb Gradle..."
-    ./gradlew clean build -x test -q
+  echo "Compilant amb Gradle..."
+  ./gradlew clean build -x test -q
 else
-    echo "Error: No s'ha trobat pom.xml ni build.gradle"
-    exit 1
+  echo "Error: No s'ha trobat pom.xml ni build.gradle en $PROJECT_ROOT"
+  exit 1
 fi
 
-if [[ ! -f "$PROJECT_ROOT/target/$JAR_NAME" ]]; then
-    echo "Error: No s'ha trobat l'arxiu JAR: $PROJECT_ROOT/target/$JAR_NAME"
-    exit 1
+# Buscar el JAR generado más reciente tras compilar
+JAR_PATH=$(ls -1t "$PROJECT_ROOT/target/"*.jar 2>/dev/null | head -n 1)
+JAR_NAME=$(basename "$JAR_PATH")
+if [[ ! -f "$JAR_PATH" ]]; then
+  echo "Error: No s'ha trobat cap arxiu JAR a $PROJECT_ROOT/target/"
+  exit 1
 fi
 
 eval "$(ssh-agent -s)"
@@ -50,16 +57,18 @@ if [[ $? -ne 0 ]]; then
     exit 1
 fi
 
+
 echo "Enviant $JAR_PATH al servidor..."
 scp -P 20127 $SSH_OPTS "$JAR_PATH" "$USER@ieticloudpro.ieti.cat:~/"
 if [[ $? -ne 0 ]]; then
-    echo "Error durant l'enviament SCP"
-    ssh-agent -k
-    exit 1
+  echo "Error durant l'enviament SCP"
+  ssh-agent -k
+  exit 1
 fi
 
 ssh -t -p 20127 $SSH_OPTS "$USER@ieticloudpro.ieti.cat" << EOF
     cd "\$HOME/"
+
 
     PID=\$(ps aux | grep 'java -jar $JAR_NAME' | grep -v 'grep' | awk '{print \$2}')
     if [ -n "\$PID" ]; then
