@@ -41,7 +41,7 @@ public class CtrlConfig implements Initializable {
     @FXML
     private void setConfigProxmox() {
         txtProtocol.setText("wss");
-        txtHost.setText("user.ieti.site");
+        txtHost.setText("vprietogallegos.ieti.site");
         txtPort.setText("443");
     }
 }

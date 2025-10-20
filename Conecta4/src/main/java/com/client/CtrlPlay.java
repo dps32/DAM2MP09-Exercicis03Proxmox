@@ -48,10 +48,10 @@ public class CtrlPlay implements Initializable {
         canvas.setOnMouseDragged(this::onMouseDragged);
         canvas.setOnMouseReleased(this::onMouseReleased);
 
-        // Define grid
-        grid = new PlayGrid(25, 25, 25, 10, 10);
+        // tablero 7 columnas x 6 filas
+        grid = new PlayGrid(25, 25, 50, 6, 7);
+        System.out.println("[DEBUG] Grid inicializado: " + grid.getCols() + "x" + grid.getRows());
 
-        // Start run/draw timer bucle
         animationTimer = new PlayTimer(this::run, this::draw, 0);
         start();
     }
@@ -212,48 +212,29 @@ public class CtrlPlay implements Initializable {
         // Clean drawing area
         gc.clearRect(0, 0, canvas.getWidth(), canvas.getHeight());
 
-        // Draw colored 'over' cells
-        for (ClientData clientData : Main.clients) {
-            // Comprovar si està dins dels límits de la graella
-            if (clientData.row >= 0 && clientData.col >= 0) {
-                Color base = getColor(clientData.color);
-                Color alpha = new Color(base.getRed(), base.getGreen(), base.getBlue(), 0.5);
-                gc.setFill(alpha); 
-                gc.fillRect(grid.getCellX(clientData.col), grid.getCellY(clientData.row), grid.getCellSize(), grid.getCellSize());
-            }
-        }
-
         // Draw grid
         drawGrid();
-
-        // Draw mouse circles
-        for (ClientData clientData : Main.clients) {
-            gc.setFill(getColor(clientData.color)); 
-            gc.fillOval(clientData.mouseX - 5, clientData.mouseY - 5, 10, 10);
-        }
-
-        // Draw objects
-        for (GameObject go : Main.objects) {
-            if (selectedObject != null && go.id.equals(selectedObject.id)) {
-                drawObject(selectedObject);
-            } else {
-                drawObject(go);
-            }
-        }
 
         // Draw FPS if needed
         if (showFPS) { animationTimer.drawFPS(gc); }   
     }
 
     public void drawGrid() {
-        gc.setStroke(Color.BLACK);
+        double cellSize = grid.getCellSize();
+        
+        // Draw board background
+        gc.setFill(Color.BLUE);
+        gc.fillRect(grid.getStartX(), grid.getStartY(), 
+                    grid.getCols() * cellSize, grid.getRows() * cellSize);
 
+        // Draw empty circles (holes for pieces)
+        gc.setFill(Color.WHITE);
         for (int row = 0; row < grid.getRows(); row++) {
             for (int col = 0; col < grid.getCols(); col++) {
-                double cellSize = grid.getCellSize();
-                double x = grid.getStartX() + col * cellSize;
-                double y = grid.getStartY() + row * cellSize;
-                gc.strokeRect(x, y, cellSize, cellSize);
+                double x = grid.getStartX() + col * cellSize + cellSize / 2;
+                double y = grid.getStartY() + row * cellSize + cellSize / 2;
+                double radius = cellSize * 0.4;
+                gc.fillOval(x - radius, y - radius, radius * 2, radius * 2);
             }
         }
     }
