@@ -9,12 +9,12 @@ import org.json.JSONObject;
 import com.shared.ClientData;
 import com.shared.GameObject;
 
+import javafx.animation.PauseTransition;
 import javafx.application.Application;
 import javafx.application.Platform;
-import javafx.animation.PauseTransition;
-import javafx.scene.paint.Color;
 import javafx.scene.Scene;
 import javafx.scene.image.Image;
+import javafx.scene.paint.Color;
 import javafx.stage.Stage;
 import javafx.util.Duration;
 
@@ -130,7 +130,49 @@ public class Main extends Application {
                     JSONObject obj = arrObjects.getJSONObject(i);
                     newObjects.add(GameObject.fromJSON(obj));
                 }
+                
+                // Detect pieces that moved to the board (for falling animation)
+                if (objects != null && ctrlPlay != null) {
+                    for (GameObject newObj : newObjects) {
+                        // Find if this object existed before
+                        GameObject oldObj = objects.stream()
+                            .filter(o -> o.id.equals(newObj.id))
+                            .findFirst()
+                            .orElse(null);
+                        
+                        // Only start animation when piece JUST moved from off-board to on-board
+                        if (oldObj != null && oldObj.x > 400 && newObj.x < 400) {
+                            // Piece was placed! Start animation from top of its column
+                            double startY = 50.0; // Top of board (25 grid start + 25 cell center)
+                            double targetY = newObj.y; // Server already set final position
+                            
+                            ctrlPlay.startFallingAnimation(newObj.id, startY, targetY);
+                            System.out.println("[MAIN] Starting fall animation for " + newObj.id + " from Y=" + startY + " to Y=" + targetY);
+                        }
+                    }
+                }
+                
                 objects = newObjects;
+
+                // Update turn info
+                String currentTurn = msgObj.optString("currentTurn", "");
+                if (!currentTurn.isEmpty() && clients.size() > 0) {
+                    ClientData myClient = clients.stream()
+                        .filter(c -> c.name.equals(clientName))
+                        .findFirst()
+                        .orElse(null);
+                    
+                    if (myClient != null && myClient.role != null) {
+                        String colorName = currentTurn.equals("R") ? "ROJO" : "AMARILLO";
+                        String turnText;
+                        if (myClient.role.equals(currentTurn)) {
+                            turnText = "TU TURNO (" + colorName + ")";
+                        } else {
+                            turnText = "TURNO: " + colorName;
+                        }
+                        ctrlPlay.title.setText(turnText);
+                    }
+                }
 
                 if (clients.size() == 1) {
 
@@ -140,7 +182,7 @@ public class Main extends Application {
 
                     ctrlWait.txtPlayer0.setText(clients.get(0).name);
                     ctrlWait.txtPlayer1.setText(clients.get(1).name);
-                    ctrlPlay.title.setText(clients.get(0).name + " vs " + clients.get(1).name);
+                    // Don't override turn text here - it's set above
                 }
                 
                 if (UtilsViews.getActiveView().equals("ViewConfig")) {
@@ -152,6 +194,12 @@ public class Main extends Application {
             case "countdown":
                 int value = msgObj.getInt("value");
                 String txt = String.valueOf(value);
+                if (value == 5) {
+                    // Reset animations when new game starts (countdown begins at 5)
+                    if (ctrlPlay != null) {
+                        ctrlPlay.resetAnimations();
+                    }
+                }
                 if (value == 0) {
                     UtilsViews.setViewAnimating("ViewPlay");
                     txt = "GO";

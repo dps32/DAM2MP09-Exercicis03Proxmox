@@ -1,7 +1,13 @@
 package com.client;
 
 import java.net.URL;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.ResourceBundle;
+import java.util.Set;
 
 import org.json.JSONObject;
 
@@ -28,22 +34,46 @@ public class CtrlPlay implements Initializable {
     private PlayTimer animationTimer;
     private PlayGrid grid;
 
+    // para saber si estoy arrastrando
     private Boolean mouseDragging = false;
     private double mouseOffsetX, mouseOffsetY;
 
+    // la ficha que he seleccionado
     private GameObject selectedObject = null;
 
+    // tamaño de las fichas
     private final double PIECE_RADIUS = 20;
     private final double PIECE_MARGIN = 10;
     private final double PIECES_START_X_OFFSET = 80;
+    
+    // para hacer la animacion de caer
+    private final Map<String, FallingPiece> fallingPieces = new HashMap<>();
+    
+    // para que no se repita la animacion
+    private Set<String> animatedPieces = new HashSet<>();
+    
+    // clase para la animacion
+    private static class FallingPiece {
+        String pieceId;
+        double currentY;
+        double targetY;
+        double velocity;
+        
+        FallingPiece(String pieceId, double startY, double targetY) {
+            this.pieceId = pieceId;
+            this.currentY = startY;
+            this.targetY = targetY;
+            this.velocity = 0;
+        }
+    }
 
     @Override
     public void initialize(URL url, ResourceBundle rb) {
 
-        // Get drawing context
+        // conseguir el contexto de dibujo
         this.gc = canvas.getGraphicsContext2D();
 
-        // Set listeners
+        // poner los listeners
         UtilsViews.parentContainer.heightProperty().addListener((observable, oldValue, newvalue) -> { onSizeChanged(); });
         UtilsViews.parentContainer.widthProperty().addListener((observable, oldValue, newvalue) -> { onSizeChanged(); });
         
@@ -52,31 +82,35 @@ public class CtrlPlay implements Initializable {
         canvas.setOnMouseDragged(this::onMouseDragged);
         canvas.setOnMouseReleased(this::onMouseReleased);
 
-        // tablero 7 columnas x 6 filas
+        // crear el tablero 7 columnas x 6 filas
         grid = new PlayGrid(25, 25, 50, 6, 7);
-        System.out.println("[DEBUG] Grid inicializado: " + grid.getCols() + "x" + grid.getRows());
 
         animationTimer = new PlayTimer(this::run, this::draw, 0);
         start();
     }
 
-    // When window changes its size
+    // cuando cambia el tamaño de la ventana
     public void onSizeChanged() {
-
         double width = UtilsViews.parentContainer.getWidth();
         double height = UtilsViews.parentContainer.getHeight();
         canvas.setWidth(width);
         canvas.setHeight(height);
     }
 
-    // Start animation timer
+    // empezar el timer de animacion
     public void start() {
         animationTimer.start();
     }
 
-    // Stop animation timer
+    // parar el timer
     public void stop() {
         animationTimer.stop();
+    }
+    
+    // reiniciar las animaciones para nueva partida
+    public void resetAnimations() {
+        animatedPieces.clear();
+        fallingPieces.clear();
     }
 
     private void setOnMouseMoved(MouseEvent event) {
@@ -89,6 +123,7 @@ public class CtrlPlay implements Initializable {
             .findFirst()
             .orElse("gray");
 
+        // crear los datos del cliente
         ClientData cd = new ClientData(
             Main.clientName, 
             color,
@@ -98,6 +133,7 @@ public class CtrlPlay implements Initializable {
             grid.isPositionInsideGrid(mouseX, mouseY) ? grid.getCol(mouseX) : -1
         );
 
+        // enviar al servidor
         JSONObject msg = new JSONObject();
         msg.put("type", "clientMouseMoving");
         msg.put("value", cd.toJSON());
@@ -108,24 +144,13 @@ public class CtrlPlay implements Initializable {
     }
 
     private void onMousePressed(MouseEvent event) {
-
         double mouseX = event.getX();
         double mouseY = event.getY();
 
         selectedObject = null;
         mouseDragging = false;
 
-        // First check if clicked on available piece
-        GameObject pieceClicked = getPieceAtPosition(mouseX, mouseY);
-        if (pieceClicked != null) {
-            selectedObject = new GameObject(pieceClicked.id, (int)mouseX, (int)mouseY, pieceClicked.col, pieceClicked.row);
-            mouseDragging = true;
-            mouseOffsetX = 0;
-            mouseOffsetY = 0;
-            return;
-        }
-
-        // Check if clicked on existing objects on board
+        // ver si he clickado dentro de una ficha de mi color
         for (GameObject go : Main.objects) {
             if (isPositionInsideObject(mouseX, mouseY, go.x, go.y, go.col, go.row)) {
                 selectedObject = new GameObject(go.id, go.x, go.y, go.col, go.row);
@@ -138,19 +163,13 @@ public class CtrlPlay implements Initializable {
     }
 
     private void onMouseDragged(MouseEvent event) {
-        if (mouseDragging) {
+        if (mouseDragging && selectedObject != null) {
+            // mover la ficha
             double objX = event.getX() - mouseOffsetX;
             double objY = event.getY() - mouseOffsetY;
 
-            selectedObject = new GameObject(selectedObject.id, (int)objX, (int)objY, (int)selectedObject.col, (int)selectedObject.row);
-
-            JSONObject msg = new JSONObject();
-            msg.put("type", "clientObjectMoving");
-            msg.put("value", selectedObject.toJSON());
-
-            if (Main.wsClient != null) {
-                Main.wsClient.safeSend(msg.toString());
-            }
+            selectedObject.x = (int)objX;
+            selectedObject.y = (int)objY;
         }
         setOnMouseMoved(event);
     }
@@ -160,18 +179,18 @@ public class CtrlPlay implements Initializable {
             double mouseX = event.getX();
             double mouseY = event.getY();
 
-            // Check if released over the grid
+            // ver si la he soltado dentro del tablero
             if (grid.isPositionInsideGrid(mouseX, mouseY)) {
                 int col = grid.getCol(mouseX);
                 
-                // Send play to server
+                // enviar jugada al servidor con el ID de la ficha
                 JSONObject msg = new JSONObject();
                 msg.put("type", "clientPlay");
                 msg.put("column", col);
+                msg.put("pieceId", selectedObject.id);
                 
                 if (Main.wsClient != null) {
                     Main.wsClient.safeSend(msg.toString());
-                    System.out.println("[DEBUG] Play sent: column " + col);
                 }
             }
 
@@ -181,11 +200,11 @@ public class CtrlPlay implements Initializable {
     }
 
     // Snap piece so its left-top corner sits exactly on the grid cell under its left tip.
+    // esto ya no se usa pero lo dejo por si acaso
     private void snapObjectLeftTop(GameObject obj) {
-        int col = grid.getCol(obj.x); // left X -> column
-        int row = grid.getRow(obj.y); // top Y  -> row
+        int col = grid.getCol(obj.x);
+        int row = grid.getRow(obj.y);
 
-        // clamp inside grid
         col = (int) Math.max(0, Math.min(col, grid.getCols() - 1));
         row = (int) Math.max(0, Math.min(row, grid.getRows() - 1));
 
@@ -206,47 +225,95 @@ public class CtrlPlay implements Initializable {
         return positionX >= objectLeftX && positionX < objectRightX &&
                positionY >= objectTopY && positionY < objectBottomY;
     }
-
-    // Run game (and animations)
-    private void run(double fps) {
-
-        if (animationTimer.fps < 1) { return; }
-
-        // Update objects and animations here
+    
+    // empezar la animacion de caida de una ficha
+    public void startFallingAnimation(String pieceId, double startY, double targetY) {
+        // si ya se animo antes, no la animo otra vez
+        if (animatedPieces.contains(pieceId)) {
+            return;
+        }
+        
+        // si ya se esta animando, no hacer nada
+        if (fallingPieces.containsKey(pieceId)) {
+            return;
+        }
+        
+        // solo animar si la ficha baja
+        if (targetY <= startY) {
+            return;
+        }
+        
+        // marcar como animada y empezar
+        animatedPieces.add(pieceId);
+        fallingPieces.put(pieceId, new FallingPiece(pieceId, startY, targetY));
     }
 
-    // Draw game to canvas
+    // actualizar el juego y las animaciones
+    private void run(double fps) {
+        if (animationTimer.fps < 1) {
+            return;
+        }
+
+        // actualizar las fichas que estan cayendo
+        List<String> toRemove = new ArrayList<>();
+        for (Map.Entry<String, FallingPiece> entry : fallingPieces.entrySet()) {
+            FallingPiece falling = entry.getValue();
+            
+            // gravedad
+            falling.velocity += 1.2;
+            falling.currentY += falling.velocity;
+            
+            // ver si ya llego abajo
+            if (falling.currentY >= falling.targetY - 2) {
+                falling.currentY = falling.targetY;
+                toRemove.add(entry.getKey());
+            }
+        }
+        
+        // quitar las animaciones que terminaron
+        for (String id : toRemove) {
+            fallingPieces.remove(id);
+        }
+    }
+
+    // dibujar todo en el canvas
     public void draw() {
+        if (Main.clients == null) {
+            return;
+        }
 
-        if (Main.clients == null) { return; }
-
-        // Clean drawing area
+        // limpiar todo
         gc.clearRect(0, 0, canvas.getWidth(), canvas.getHeight());
 
-        // Draw grid
+        // dibujar el tablero
         drawGrid();
 
-        // Draw player pieces on the right
-        drawPlayerPieces();
-
-        // Draw dragged piece if any
+        // dibujar todas las fichas
+        drawAllPieces();
+        
+        // dibujar la ficha que estoy arrastrando encima de todo
         if (mouseDragging && selectedObject != null) {
             drawDraggedPiece(selectedObject);
         }
+        
+        // dibujar el cursor del otro jugador
+        drawClientPointers();
 
-        // Draw FPS if needed
-        if (showFPS) { animationTimer.drawFPS(gc); }   
+        // mostrar FPS si hace falta
+        if (showFPS) {
+            animationTimer.drawFPS(gc);
+        }
     }
 
     public void drawGrid() {
         double cellSize = grid.getCellSize();
         
-        // Draw board background
+        // dibujar el fondo azul del tablero
         gc.setFill(Color.BLUE);
         gc.fillRect(grid.getStartX(), grid.getStartY(), 
                     grid.getCols() * cellSize, grid.getRows() * cellSize);
 
-        // Draw empty circles (holes for pieces)
+        // dibujar los circulos blancos (agujeros para las fichas)
         gc.setFill(Color.WHITE);
         for (int row = 0; row < grid.getRows(); row++) {
             for (int col = 0; col < grid.getCols(); col++) {
@@ -255,6 +322,128 @@ public class CtrlPlay implements Initializable {
                 double radius = cellSize * 0.4;
                 gc.fillOval(x - radius, y - radius, radius * 2, radius * 2);
             }
+        }
+    }
+
+    private void drawAllPieces() {
+        if (Main.objects == null) {
+            return;
+        }
+        
+        // dibujar cada ficha
+        for (GameObject piece : Main.objects) {
+            if (piece.id == null) {
+                continue;
+            }
+            
+            // no dibujar la ficha que estoy arrastrando (se dibuja despues)
+            if (mouseDragging && selectedObject != null && piece.id.equals(selectedObject.id)) {
+                continue;
+            }
+            
+            // ver de que color es la ficha
+            Color pieceColor;
+            if (piece.id.startsWith("R_")) {
+                pieceColor = Color.RED;
+            } else if (piece.id.startsWith("Y_")) {
+                pieceColor = Color.YELLOW;
+            } else {
+                pieceColor = Color.GRAY;
+            }
+            
+            // usar la posicion de la animacion si esta cayendo
+            double drawY = piece.y;
+            if (fallingPieces.containsKey(piece.id)) {
+                drawY = fallingPieces.get(piece.id).currentY;
+            }
+            
+            // dibujar la ficha
+            gc.setFill(pieceColor);
+            gc.fillOval(piece.x - PIECE_RADIUS, drawY - PIECE_RADIUS, 2 * PIECE_RADIUS, 2 * PIECE_RADIUS);
+            gc.setStroke(Color.BLACK);
+            gc.setLineWidth(2);
+            gc.strokeOval(piece.x - PIECE_RADIUS, drawY - PIECE_RADIUS, 2 * PIECE_RADIUS, 2 * PIECE_RADIUS);
+        }
+    }
+    
+    /**
+     * Draw hitboxes around all pieces for debugging
+     */
+    private void drawHitboxes() {
+        if (Main.objects == null || Main.clients == null) return;
+        
+        // Get my role
+        String myRole = Main.clients.stream()
+            .filter(c -> c.name.equals(Main.clientName))
+            .map(c -> c.role)
+            .findFirst()
+            .orElse("");
+        
+        for (GameObject piece : Main.objects) {
+            if (piece.id == null) continue;
+            
+            // Use animated Y position if piece is falling
+            double drawY = piece.y;
+            if (fallingPieces.containsKey(piece.id)) {
+                drawY = fallingPieces.get(piece.id).currentY;
+            }
+            
+            // Draw hitbox circle
+            // Green for my pieces, gray for opponent's pieces
+            if (!myRole.isEmpty() && piece.id.startsWith(myRole + "_")) {
+                gc.setStroke(Color.LIME);
+                gc.setLineWidth(2);
+            } else {
+                gc.setStroke(Color.GRAY);
+                gc.setLineWidth(1);
+            }
+            gc.strokeOval(piece.x - PIECE_RADIUS, drawY - PIECE_RADIUS, 2 * PIECE_RADIUS, 2 * PIECE_RADIUS);
+            
+            // Draw center point
+            gc.setFill(Color.WHITE);
+            gc.fillOval(piece.x - 2, drawY - 2, 4, 4);
+        }
+    }
+    
+    // dibujar el cursor del contrincante
+    private void drawClientPointers() {
+        if (Main.clients == null) {
+            return;
+        }
+        
+        for (ClientData client : Main.clients) {
+            // no dibujar mi propio cursor
+            if (client.name.equals(Main.clientName)) {
+                continue;
+            }
+            
+            // ver el color segun el rol
+            Color pointerColor;
+            if (client.role != null) {
+                if (client.role.equals("R")) {
+                    pointerColor = Color.RED;
+                } else {
+                    pointerColor = Color.YELLOW;
+                }
+            } else {
+                pointerColor = Color.GRAY;
+            }
+            
+            // dibujar circulo semitransparente donde esta el raton del otro
+            double x = client.mouseX;
+            double y = client.mouseY;
+            double radius = 15;
+            
+            // hacer el color transparente
+            gc.setFill(Color.color(
+                pointerColor.getRed(), 
+                pointerColor.getGreen(), 
+                pointerColor.getBlue(), 
+                0.3
+            ));
+            
+            // dibujar el circulo
+            gc.fillOval(x - radius, y - radius, radius * 2, radius * 2);
         }
     }
 
@@ -271,7 +460,7 @@ public class CtrlPlay implements Initializable {
         if (myRole.isEmpty()) return;
 
         // Filter pieces of the local player
-        java.util.List<GameObject> myPieces = new java.util.ArrayList<>();
+        List<GameObject> myPieces = new ArrayList<>();
         for (GameObject go : Main.objects) {
             if (go.id != null && go.id.startsWith(myRole + "_")) {
                 myPieces.add(go);
@@ -296,33 +485,44 @@ public class CtrlPlay implements Initializable {
     }
 
     private GameObject getPieceAtPosition(double mouseX, double mouseY) {
-        if (Main.objects == null || Main.clients == null) return null;
+        if (Main.objects == null || Main.clients == null) {
+            return null;
+        }
         
-        String myRole = Main.clients.stream()
-            .filter(c -> c.name.equals(Main.clientName))
-            .map(c -> c.role)
-            .findFirst()
-            .orElse("");
-        
-        if (myRole.isEmpty()) return null;
-
-        java.util.List<GameObject> myPieces = new java.util.ArrayList<>();
-        for (GameObject go : Main.objects) {
-            if (go.id != null && go.id.startsWith(myRole + "_")) {
-                myPieces.add(go);
+        // buscar mis datos de cliente
+        ClientData myClient = null;
+        for (ClientData c : Main.clients) {
+            if (c.name.equals(Main.clientName)) {
+                myClient = c;
+                break;
             }
         }
-
-        double startX = canvas.getWidth() - PIECES_START_X_OFFSET;
-        double startY = grid.getStartY() + 10;
         
-        for (int i = 0; i < myPieces.size(); i++) {
-            double x = startX + PIECE_RADIUS;
-            double y = startY + i * (2 * PIECE_RADIUS + PIECE_MARGIN) + PIECE_RADIUS;
+        if (myClient == null) {
+            return null;
+        }
+        
+        String myRole = myClient.role;
+        if (myRole == null || myRole.isEmpty()) {
+            return null;
+        }
+
+        // buscar fichas de mi color que NO esten en el tablero (x > 400)
+        for (GameObject piece : Main.objects) {
+            if (piece.id == null || !piece.id.startsWith(myRole + "_")) {
+                continue;
+            }
             
-            double distance = Math.sqrt(Math.pow(mouseX - x, 2) + Math.pow(mouseY - y, 2));
+            // solo puedo coger fichas que no esten ya en el tablero
+            if (piece.x <= 400) {
+                continue;
+            }
+            
+            // ver si he clickado dentro de la ficha
+            double distance = Math.sqrt(Math.pow(mouseX - piece.x, 2) + Math.pow(mouseY - piece.y, 2));
+            
             if (distance <= PIECE_RADIUS) {
-                return myPieces.get(i);
+                return piece;
             }
         }
         
@@ -330,15 +530,27 @@ public class CtrlPlay implements Initializable {
     }
 
     private void drawDraggedPiece(GameObject piece) {
-        if (piece == null || Main.clients == null) return;
+        if (piece == null || Main.clients == null) {
+            return;
+        }
         
-        String myRole = Main.clients.stream()
-            .filter(c -> c.name.equals(Main.clientName))
-            .map(c -> c.role)
-            .findFirst()
-            .orElse("");
+        // buscar mi rol para saber el color
+        String myRole = "";
+        for (ClientData c : Main.clients) {
+            if (c.name.equals(Main.clientName)) {
+                myRole = c.role;
+                break;
+            }
+        }
         
-        Color pieceColor = myRole.equals("R") ? Color.RED : Color.YELLOW;
+        Color pieceColor;
+        if (myRole.equals("R")) {
+            pieceColor = Color.RED;
+        } else {
+            pieceColor = Color.YELLOW;
+        }
+        
+        // dibujar la ficha
         gc.setFill(pieceColor);
         gc.fillOval(piece.x - PIECE_RADIUS, piece.y - PIECE_RADIUS, 2 * PIECE_RADIUS, 2 * PIECE_RADIUS);
         gc.setStroke(Color.BLACK);
@@ -354,46 +566,46 @@ public class CtrlPlay implements Initializable {
         double width = obj.col * cellSize;
         double height = obj.row * cellSize;
 
-        // Seleccionar un color basat en l'objectId
+        // color del objeto
         Color color = Color.GRAY;
 
-        // Dibuixar el rectangle
+        // dibujar el rectangulo
         gc.setFill(color);
         gc.fillRect(x, y, width, height);
 
-        // Dibuixar el contorn
+        // dibujar el contorno
         gc.setStroke(Color.BLACK);
         gc.strokeRect(x, y, width, height);
 
-        // Opcionalment, afegir text (per exemple, l'objectId)
+        // poner texto con el id
         gc.setFill(Color.BLACK);
         gc.fillText(obj.id, x + 5, y + 15);
     }
 
+    // funcion auxiliar para conseguir colores
     public Color getColor(String colorName) {
-        switch (colorName.toLowerCase()) {
-            case "red":
-                return Color.RED;
-            case "blue":
-                return Color.BLUE;
-            case "green":
-                return Color.GREEN;
-            case "yellow":
-                return Color.YELLOW;
-            case "orange":
-                return Color.ORANGE;
-            case "purple":
-                return Color.PURPLE;
-            case "pink":
-                return Color.PINK;
-            case "brown":
-                return Color.BROWN;
-            case "gray":
-                return Color.GRAY;
-            case "black":
-                return Color.BLACK;
-            default:
-                return Color.LIGHTGRAY; // Default color
+        if (colorName.equals("red")) {
+            return Color.RED;
+        } else if (colorName.equals("blue")) {
+            return Color.BLUE;
+        } else if (colorName.equals("green")) {
+            return Color.GREEN;
+        } else if (colorName.equals("yellow")) {
+            return Color.YELLOW;
+        } else if (colorName.equals("orange")) {
+            return Color.ORANGE;
+        } else if (colorName.equals("purple")) {
+            return Color.PURPLE;
+        } else if (colorName.equals("pink")) {
+            return Color.PINK;
+        } else if (colorName.equals("brown")) {
+            return Color.BROWN;
+        } else if (colorName.equals("gray")) {
+            return Color.GRAY;
+        } else if (colorName.equals("black")) {
+            return Color.BLACK;
+        } else {
+            return Color.LIGHTGRAY;
         }
     }
 }
