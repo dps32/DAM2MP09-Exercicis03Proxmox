@@ -5,6 +5,7 @@ import org.json.JSONObject;
 public class ClientData {
     public String name;
     public String color;
+    public String role;
     public int mouseX;
     public int mouseY;
     public int row;
@@ -13,6 +14,7 @@ public class ClientData {
     public ClientData(String name, String color) {
         this.name = name;
         this.color = color;
+        this.role = "";
         this.mouseX = -1;
         this.mouseY = -1;
         this.row = -1;
@@ -22,6 +24,7 @@ public class ClientData {
     public ClientData(String name, String color, int mouseX, int mouseY, int row, int col) {
         this.name = name;
         this.color = color;
+        this.role = "";
         this.mouseX = mouseX;
         this.mouseY = mouseY;
         this.row = row;
@@ -38,6 +41,7 @@ public class ClientData {
         JSONObject obj = new JSONObject();
         obj.put("name", name);
         obj.put("color", color);
+        obj.put("role", role);
         obj.put("mouseX", mouseX);
         obj.put("mouseY", mouseY);
         obj.put("row", row);
@@ -51,6 +55,7 @@ public class ClientData {
         String color = obj.optString("color", null);
 
         ClientData cd = new ClientData(name, color);
+        cd.role = obj.optString("role", "");
         cd.mouseX = obj.optInt("mouseX", -1);
         cd.mouseY = obj.optInt("mouseY", -1);
         cd.row = obj.optInt("row", -1);

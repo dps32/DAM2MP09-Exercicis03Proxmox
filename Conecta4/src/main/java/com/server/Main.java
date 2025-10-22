@@ -1,13 +1,5 @@
 package com.server;
 
-import org.java_websocket.server.WebSocketServer;
-import org.java_websocket.WebSocket;
-import org.java_websocket.handshake.ClientHandshake;
-import org.java_websocket.exceptions.WebsocketNotConnectedException;
-
-import org.json.JSONArray;
-import org.json.JSONObject;
-
 import java.net.InetSocketAddress;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -20,6 +12,12 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 
+import org.java_websocket.WebSocket;
+import org.java_websocket.exceptions.WebsocketNotConnectedException;
+import org.java_websocket.handshake.ClientHandshake;
+import org.java_websocket.server.WebSocketServer;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 import com.shared.ClientData;
 import com.shared.GameObject;
@@ -59,6 +57,7 @@ public class Main extends WebSocketServer {
     // Tipus de missatge nous i (alguns) heretats
     private static final String T_CLIENT_MOUSE_MOVING = "clientMouseMoving";  // client -> server
     private static final String T_CLIENT_OBJECT_MOVING = "clientObjectMoving";// client -> server
+    private static final String T_CLIENT_PLAY = "clientPlay";                 // client -> server
     private static final String T_SERVER_DATA = "serverData";                 // server -> clients
     private static final String T_COUNTDOWN = "countdown";                    // server -> clients
 
@@ -248,6 +247,13 @@ public class Main extends WebSocketServer {
             case T_CLIENT_OBJECT_MOVING -> {
                 GameObject objData = GameObject.fromJSON(obj.getJSONObject(K_VALUE));
                 gameObjects.put(objData.id, objData);
+            }
+
+            case T_CLIENT_PLAY -> {
+                String clientName = clients.nameBySocket(conn);
+                int column = obj.optInt("column", -1);
+                System.out.println("[SERVER] Play received from " + clientName + " on column " + column);
+                // TODO: Validar turno y procesar jugada
             }
 
             default -> {

@@ -5,15 +5,15 @@ import java.util.ResourceBundle;
 
 import org.json.JSONObject;
 
+import com.shared.ClientData;
+import com.shared.GameObject;
+
 import javafx.fxml.FXML;
 import javafx.fxml.Initializable;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.paint.Color;
-
-import com.shared.ClientData;
-import com.shared.GameObject;
 
 public class CtrlPlay implements Initializable {
 
@@ -32,6 +32,10 @@ public class CtrlPlay implements Initializable {
     private double mouseOffsetX, mouseOffsetY;
 
     private GameObject selectedObject = null;
+
+    private final double PIECE_RADIUS = 20;
+    private final double PIECE_MARGIN = 10;
+    private final double PIECES_START_X_OFFSET = 80;
 
     @Override
     public void initialize(URL url, ResourceBundle rb) {
@@ -111,6 +115,17 @@ public class CtrlPlay implements Initializable {
         selectedObject = null;
         mouseDragging = false;
 
+        // First check if clicked on available piece
+        GameObject pieceClicked = getPieceAtPosition(mouseX, mouseY);
+        if (pieceClicked != null) {
+            selectedObject = new GameObject(pieceClicked.id, (int)mouseX, (int)mouseY, pieceClicked.col, pieceClicked.row);
+            mouseDragging = true;
+            mouseOffsetX = 0;
+            mouseOffsetY = 0;
+            return;
+        }
+
+        // Check if clicked on existing objects on board
         for (GameObject go : Main.objects) {
             if (isPositionInsideObject(mouseX, mouseY, go.x, go.y, go.col, go.row)) {
                 selectedObject = new GameObject(go.id, go.x, go.y, go.col, go.row);
@@ -141,28 +156,24 @@ public class CtrlPlay implements Initializable {
     }
 
     private void onMouseReleased(MouseEvent event) {
-        if (selectedObject != null) {
-            double objX = event.getX() - mouseOffsetX; // left tip X
-            double objY = event.getY() - mouseOffsetY; // left tip Y
+        if (selectedObject != null && mouseDragging) {
+            double mouseX = event.getX();
+            double mouseY = event.getY();
 
-            // build object with dragged position (size stays in col/row)
-            selectedObject = new GameObject(
-                selectedObject.id,
-                (int) objX,
-                (int) objY,
-                selectedObject.col,
-                selectedObject.row
-            );
-
-            // snap by left-top corner to underlying cell
-            if (grid.isPositionInsideGrid(objX, objY)) {
-                snapObjectLeftTop(selectedObject);
+            // Check if released over the grid
+            if (grid.isPositionInsideGrid(mouseX, mouseY)) {
+                int col = grid.getCol(mouseX);
+                
+                // Send play to server
+                JSONObject msg = new JSONObject();
+                msg.put("type", "clientPlay");
+                msg.put("column", col);
+                
+                if (Main.wsClient != null) {
+                    Main.wsClient.safeSend(msg.toString());
+                    System.out.println("[DEBUG] Play sent: column " + col);
+                }
             }
-
-            JSONObject msg = new JSONObject();
-            msg.put("type", "clientObjectMoving");
-            msg.put("value", selectedObject.toJSON());
-            if (Main.wsClient != null) Main.wsClient.safeSend(msg.toString());
 
             mouseDragging = false;
             selectedObject = null;
@@ -215,6 +226,14 @@ public class CtrlPlay implements Initializable {
         // Draw grid
         drawGrid();
 
+        // Draw player pieces on the right
+        drawPlayerPieces();
+
+        // Draw dragged piece if any
+        if (mouseDragging && selectedObject != null) {
+            drawDraggedPiece(selectedObject);
+        }
+
         // Draw FPS if needed
         if (showFPS) { animationTimer.drawFPS(gc); }   
     }
@@ -237,6 +256,94 @@ public class CtrlPlay implements Initializable {
                 gc.fillOval(x - radius, y - radius, radius * 2, radius * 2);
             }
         }
+    }
+
+    private void drawPlayerPieces() {
+        if (Main.objects == null || Main.clients == null) return;
+        
+        // Get local player's role
+        String myRole = Main.clients.stream()
+            .filter(c -> c.name.equals(Main.clientName))
+            .map(c -> c.role)
+            .findFirst()
+            .orElse("");
+        
+        if (myRole.isEmpty()) return;
+
+        // Filter pieces of the local player
+        java.util.List<GameObject> myPieces = new java.util.ArrayList<>();
+        for (GameObject go : Main.objects) {
+            if (go.id != null && go.id.startsWith(myRole + "_")) {
+                myPieces.add(go);
+            }
+        }
+
+        // Draw pieces on the right side
+        double startX = canvas.getWidth() - PIECES_START_X_OFFSET;
+        double startY = grid.getStartY() + 10;
+        
+        for (int i = 0; i < myPieces.size(); i++) {
+            double x = startX + PIECE_RADIUS;
+            double y = startY + i * (2 * PIECE_RADIUS + PIECE_MARGIN) + PIECE_RADIUS;
+            
+            Color pieceColor = myRole.equals("R") ? Color.RED : Color.YELLOW;
+            gc.setFill(pieceColor);
+            gc.fillOval(x - PIECE_RADIUS, y - PIECE_RADIUS, 2 * PIECE_RADIUS, 2 * PIECE_RADIUS);
+            gc.setStroke(Color.BLACK);
+            gc.setLineWidth(1.5);
+            gc.strokeOval(x - PIECE_RADIUS, y - PIECE_RADIUS, 2 * PIECE_RADIUS, 2 * PIECE_RADIUS);
+        }
+    }
+
+    private GameObject getPieceAtPosition(double mouseX, double mouseY) {
+        if (Main.objects == null || Main.clients == null) return null;
+        
+        String myRole = Main.clients.stream()
+            .filter(c -> c.name.equals(Main.clientName))
+            .map(c -> c.role)
+            .findFirst()
+            .orElse("");
+        
+        if (myRole.isEmpty()) return null;
+
+        java.util.List<GameObject> myPieces = new java.util.ArrayList<>();
+        for (GameObject go : Main.objects) {
+            if (go.id != null && go.id.startsWith(myRole + "_")) {
+                myPieces.add(go);
+            }
+        }
+
+        double startX = canvas.getWidth() - PIECES_START_X_OFFSET;
+        double startY = grid.getStartY() + 10;
+        
+        for (int i = 0; i < myPieces.size(); i++) {
+            double x = startX + PIECE_RADIUS;
+            double y = startY + i * (2 * PIECE_RADIUS + PIECE_MARGIN) + PIECE_RADIUS;
+            
+            double distance = Math.sqrt(Math.pow(mouseX - x, 2) + Math.pow(mouseY - y, 2));
+            if (distance <= PIECE_RADIUS) {
+                return myPieces.get(i);
+            }
+        }
+        
+        return null;
+    }
+
+    private void drawDraggedPiece(GameObject piece) {
+        if (piece == null || Main.clients == null) return;
+        
+        String myRole = Main.clients.stream()
+            .filter(c -> c.name.equals(Main.clientName))
+            .map(c -> c.role)
+            .findFirst()
+            .orElse("");
+        
+        Color pieceColor = myRole.equals("R") ? Color.RED : Color.YELLOW;
+        gc.setFill(pieceColor);
+        gc.fillOval(piece.x - PIECE_RADIUS, piece.y - PIECE_RADIUS, 2 * PIECE_RADIUS, 2 * PIECE_RADIUS);
+        gc.setStroke(Color.BLACK);
+        gc.setLineWidth(2);
+        gc.strokeOval(piece.x - PIECE_RADIUS, piece.y - PIECE_RADIUS, 2 * PIECE_RADIUS, 2 * PIECE_RADIUS);
     }
 
     public void drawObject(GameObject obj) {
