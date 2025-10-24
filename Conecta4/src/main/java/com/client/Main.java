@@ -25,6 +25,7 @@ public class Main extends Application {
     public static String clientName = "";
     public static List<ClientData> clients;
     public static List<GameObject> objects;
+    public static boolean isMyTurn = false;
 
     public static CtrlConfig ctrlConfig;
     public static CtrlWait ctrlWait;
@@ -163,9 +164,10 @@ public class Main extends Application {
                         .orElse(null);
                     
                     if (myClient != null && myClient.role != null) {
+                        isMyTurn = myClient.role.equals(currentTurn);
                         String colorName = currentTurn.equals("R") ? "ROJO" : "AMARILLO";
                         String turnText;
-                        if (myClient.role.equals(currentTurn)) {
+                        if (isMyTurn) {
                             turnText = "TU TURNO (" + colorName + ")";
                         } else {
                             turnText = "TURNO: " + colorName;

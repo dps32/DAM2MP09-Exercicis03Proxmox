@@ -150,21 +150,41 @@ public class CtrlPlay implements Initializable {
         selectedObject = null;
         mouseDragging = false;
 
-        // ver si he clickado dentro de una ficha de mi color
+        // comprobamos si es el turno del usuario actual
+        if (!Main.isMyTurn) return;
+
+        // nos aseguramos de que tenemos los datos necesarios del juego
+        if (Main.clients == null || Main.objects == null) return;
+
+        // obtenemos el rol asignado al usuario actual (R o Y)
+        String myRole = Main.clients.stream()
+            .filter(c -> c.name.equals(Main.clientName))
+            .map(c -> c.role)
+            .findFirst()
+            .orElse("");
+
+        if (myRole.isEmpty()) return;
+
+        // buscamos si el usuario ha clickado dentro de alguna ficha de su color
         for (GameObject go : Main.objects) {
-            if (isPositionInsideObject(mouseX, mouseY, go.x, go.y, go.col, go.row)) {
-                selectedObject = new GameObject(go.id, go.x, go.y, go.col, go.row);
-                mouseDragging = true;
-                mouseOffsetX = event.getX() - go.x;
-                mouseOffsetY = event.getY() - go.y;
-                break;
-            }
+            if (go.role == null || !go.role.equals(myRole)) continue;
+            
+            // calculamos la distancia desde el cursor hasta el centro de la ficha
+            double distance = Math.sqrt(Math.pow(mouseX - go.x, 2) + Math.pow(mouseY - go.y, 2));
+            
+            if (distance > PIECE_RADIUS) continue;
+            
+            selectedObject = new GameObject(go.id, go.x, go.y, go.col, go.row);
+            mouseDragging = true;
+            mouseOffsetX = mouseX - go.x;
+            mouseOffsetY = mouseY - go.y;
+            break;
         }
     }
 
     private void onMouseDragged(MouseEvent event) {
         if (mouseDragging && selectedObject != null) {
-            // mover la ficha
+            // actualizamos la posicion de la ficha al arrastrar
             double objX = event.getX() - mouseOffsetX;
             double objY = event.getY() - mouseOffsetY;
 
@@ -179,11 +199,11 @@ public class CtrlPlay implements Initializable {
             double mouseX = event.getX();
             double mouseY = event.getY();
 
-            // ver si la he soltado dentro del tablero
-            if (grid.isPositionInsideGrid(mouseX, mouseY)) {
+            // comprobamos que aun es el turno del usuario y que ha soltado la ficha dentro del tablero
+            if (Main.isMyTurn && grid.isPositionInsideGrid(mouseX, mouseY)) {
                 int col = grid.getCol(mouseX);
                 
-                // enviar jugada al servidor con el ID de la ficha
+                // enviamos la jugada al servidor con la columna seleccionada y el ID de la ficha
                 JSONObject msg = new JSONObject();
                 msg.put("type", "clientPlay");
                 msg.put("column", col);
@@ -201,17 +221,6 @@ public class CtrlPlay implements Initializable {
 
     // Snap piece so its left-top corner sits exactly on the grid cell under its left tip.
     // esto ya no se usa pero lo dejo por si acaso
-    private void snapObjectLeftTop(GameObject obj) {
-        int col = grid.getCol(obj.x);
-        int row = grid.getRow(obj.y);
-
-        col = (int) Math.max(0, Math.min(col, grid.getCols() - 1));
-        row = (int) Math.max(0, Math.min(row, grid.getRows() - 1));
-
-        obj.x = grid.getCellX(col);
-        obj.y = grid.getCellY(row);
-    }
-
     public Boolean isPositionInsideObject(double positionX, double positionY, int objX, int objY, int cols, int rows) {
         double cellSize = grid.getCellSize();
         double objectWidth = cols * cellSize;
@@ -225,23 +234,23 @@ public class CtrlPlay implements Initializable {
         return positionX >= objectLeftX && positionX < objectRightX &&
                positionY >= objectTopY && positionY < objectBottomY;
     }
+
+    /*
+     * 
+     * VICTOR REVISA ESTO QUE LA ANIMACION METE UNOS PARPADEOS QUE NO VEAS
+     * 
+     */
     
     // empezar la animacion de caida de una ficha
     public void startFallingAnimation(String pieceId, double startY, double targetY) {
         // si ya se animo antes, no la animo otra vez
-        if (animatedPieces.contains(pieceId)) {
-            return;
-        }
+        if (animatedPieces.contains(pieceId)) return;
         
         // si ya se esta animando, no hacer nada
-        if (fallingPieces.containsKey(pieceId)) {
-            return;
-        }
+        if (fallingPieces.containsKey(pieceId)) return;
         
         // solo animar si la ficha baja
-        if (targetY <= startY) {
-            return;
-        }
+        if (targetY <= startY) return;
         
         // marcar como animada y empezar
         animatedPieces.add(pieceId);
@@ -250,9 +259,7 @@ public class CtrlPlay implements Initializable {
 
     // actualizar el juego y las animaciones
     private void run(double fps) {
-        if (animationTimer.fps < 1) {
-            return;
-        }
+        if (animationTimer.fps < 1) return;
 
         // actualizar las fichas que estan cayendo
         List<String> toRemove = new ArrayList<>();
@@ -278,9 +285,7 @@ public class CtrlPlay implements Initializable {
 
     // dibujar todo en el canvas
     public void draw() {
-        if (Main.clients == null) {
-            return;
-        }
+        if (Main.clients == null) return;
 
         // limpiar todo
         gc.clearRect(0, 0, canvas.getWidth(), canvas.getHeight());
@@ -326,22 +331,26 @@ public class CtrlPlay implements Initializable {
     }
 
     private void drawAllPieces() {
-        if (Main.objects == null) {
-            return;
+        if (Main.objects == null) return;
+        
+        // obtenemos el rol del usuario actual para identificar sus fichas
+        String myRole = "";
+        if (Main.clients != null) {
+            myRole = Main.clients.stream()
+                .filter(c -> c.name.equals(Main.clientName))
+                .map(c -> c.role)
+                .findFirst()
+                .orElse("");
         }
         
-        // dibujar cada ficha
+        // renderizamos todas las fichas del juego
         for (GameObject piece : Main.objects) {
-            if (piece.id == null) {
-                continue;
-            }
+            if (piece.id == null) continue;
             
-            // no dibujar la ficha que estoy arrastrando (se dibuja despues)
-            if (mouseDragging && selectedObject != null && piece.id.equals(selectedObject.id)) {
-                continue;
-            }
+            // la ficha que esta siendo arrastrada se dibuja al final para que aparezca encima
+            if (mouseDragging && selectedObject != null && piece.id.equals(selectedObject.id)) continue;
             
-            // ver de que color es la ficha
+            // determinamos el color de la ficha segun su ID
             Color pieceColor;
             if (piece.id.startsWith("R_")) {
                 pieceColor = Color.RED;
@@ -351,13 +360,19 @@ public class CtrlPlay implements Initializable {
                 pieceColor = Color.GRAY;
             }
             
-            // usar la posicion de la animacion si esta cayendo
+            // aplicamos opacidad a las fichas que el usuario no puede mover actualmente
+            boolean isMyPiece = piece.role != null && piece.role.equals(myRole);
+            if (!Main.isMyTurn || !isMyPiece) {
+                pieceColor = pieceColor.deriveColor(0, 1, 1, 0.5);
+            }
+            
+            // si la ficha esta cayendo, usamos la posicion de la animacion
             double drawY = piece.y;
             if (fallingPieces.containsKey(piece.id)) {
                 drawY = fallingPieces.get(piece.id).currentY;
             }
             
-            // dibujar la ficha
+            // dibujamos el circulo de la ficha con su borde
             gc.setFill(pieceColor);
             gc.fillOval(piece.x - PIECE_RADIUS, drawY - PIECE_RADIUS, 2 * PIECE_RADIUS, 2 * PIECE_RADIUS);
             gc.setStroke(Color.BLACK);
@@ -407,15 +422,11 @@ public class CtrlPlay implements Initializable {
     
     // dibujar el cursor del contrincante
     private void drawClientPointers() {
-        if (Main.clients == null) {
-            return;
-        }
+        if (Main.clients == null) return;
         
         for (ClientData client : Main.clients) {
             // no dibujar mi propio cursor
-            if (client.name.equals(Main.clientName)) {
-                continue;
-            }
+            if (client.name.equals(Main.clientName)) continue;
             
             // ver el color segun el rol
             Color pointerColor;
@@ -485,9 +496,7 @@ public class CtrlPlay implements Initializable {
     }
 
     private GameObject getPieceAtPosition(double mouseX, double mouseY) {
-        if (Main.objects == null || Main.clients == null) {
-            return null;
-        }
+        if (Main.objects == null || Main.clients == null) return null;
         
         // buscar mis datos de cliente
         ClientData myClient = null;
@@ -498,25 +507,17 @@ public class CtrlPlay implements Initializable {
             }
         }
         
-        if (myClient == null) {
-            return null;
-        }
+        if (myClient == null) return null;
         
         String myRole = myClient.role;
-        if (myRole == null || myRole.isEmpty()) {
-            return null;
-        }
+        if (myRole == null || myRole.isEmpty()) return null;
 
         // buscar fichas de mi color que NO esten en el tablero (x > 400)
         for (GameObject piece : Main.objects) {
-            if (piece.id == null || !piece.id.startsWith(myRole + "_")) {
-                continue;
-            }
+            if (piece.id == null || !piece.id.startsWith(myRole + "_")) continue;
             
             // solo puedo coger fichas que no esten ya en el tablero
-            if (piece.x <= 400) {
-                continue;
-            }
+            if (piece.x <= 400) continue;
             
             // ver si he clickado dentro de la ficha
             double distance = Math.sqrt(Math.pow(mouseX - piece.x, 2) + Math.pow(mouseY - piece.y, 2));
@@ -530,9 +531,7 @@ public class CtrlPlay implements Initializable {
     }
 
     private void drawDraggedPiece(GameObject piece) {
-        if (piece == null || Main.clients == null) {
-            return;
-        }
+        if (piece == null || Main.clients == null) return;
         
         // buscar mi rol para saber el color
         String myRole = "";

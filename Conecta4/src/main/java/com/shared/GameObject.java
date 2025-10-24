@@ -8,6 +8,7 @@ public class GameObject {
     public int y;
     public int col;
     public int row;
+    public String role;
 
     public GameObject(String id, int x, int y, int cols, int rows) {
         this.id = id;
@@ -15,6 +16,7 @@ public class GameObject {
         this.y = y;
         this.col = cols;
         this.row = rows;
+        this.role = id != null && id.startsWith("R") ? "R" : id != null && id.startsWith("Y") ? "Y" : null;
     }
 
     @Override
@@ -30,6 +32,9 @@ public class GameObject {
         obj.put("y", y);
         obj.put("cols", col);
         obj.put("rows", row);
+        if (role != null) {
+            obj.put("role", role);
+        }
         return obj;
     }
 
