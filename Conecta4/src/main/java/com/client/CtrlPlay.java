@@ -63,7 +63,7 @@ public class CtrlPlay implements Initializable {
             this.pieceId = pieceId;
             this.currentY = startY;
             this.targetY = targetY;
-            this.velocity = 0;
+            this.velocity = 2.0; // velocidad inicial para que empiece suave
         }
     }
 
@@ -266,12 +266,12 @@ public class CtrlPlay implements Initializable {
         for (Map.Entry<String, FallingPiece> entry : fallingPieces.entrySet()) {
             FallingPiece falling = entry.getValue();
             
-            // gravedad
-            falling.velocity += 1.2;
+            // aplicar gravedad suave
+            falling.velocity += 0.8; // gravedad mas suave
             falling.currentY += falling.velocity;
             
             // ver si ya llego abajo
-            if (falling.currentY >= falling.targetY - 2) {
+            if (falling.currentY >= falling.targetY) {
                 falling.currentY = falling.targetY;
                 toRemove.add(entry.getKey());
             }

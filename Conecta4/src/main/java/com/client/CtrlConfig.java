@@ -24,6 +24,18 @@ public class CtrlConfig implements Initializable {
 
     @Override
     public void initialize(URL url, ResourceBundle rb) {
+        // limpiar mensaje al inicializar
+        if (txtMessage != null) {
+            txtMessage.setText("");
+        }
+    }
+    
+    // metodo para resetear la vista cuando volvemos del juego
+    public void resetView() {
+        txtMessage.setText("");
+        txtProtocol.setText("ws");
+        txtHost.setText("localhost");
+        txtPort.setText("3000");
     }
 
     @FXML

@@ -18,6 +18,7 @@ import javafx.scene.paint.Color;
 import javafx.stage.Stage;
 import javafx.util.Duration;
 
+
 public class Main extends Application {
 
     public static UtilsWS wsClient;
@@ -26,10 +27,13 @@ public class Main extends Application {
     public static List<ClientData> clients;
     public static List<GameObject> objects;
     public static boolean isMyTurn = false;
+    public static JSONObject lastServerData = null; // datos del servidor
 
     public static CtrlConfig ctrlConfig;
     public static CtrlWait ctrlWait;
     public static CtrlPlay ctrlPlay;
+    public static CtrlWinner ctrlWinner;
+    public static CtrlResult ctrlResult;
 
     public static void main(String[] args) {
 
@@ -47,21 +51,28 @@ public class Main extends Application {
         UtilsViews.addView(getClass(), "ViewConfig", "/assets/viewConfig.fxml"); 
         UtilsViews.addView(getClass(), "ViewWait", "/assets/viewWait.fxml");
         UtilsViews.addView(getClass(), "ViewPlay", "/assets/viewPlay.fxml");
+        UtilsViews.addView(getClass(), "ViewWinner", "/assets/viewWinner.fxml");
+        UtilsViews.addView(getClass(), "ViewResult", "/assets/viewResult.fxml");
 
         ctrlConfig = (CtrlConfig) UtilsViews.getController("ViewConfig");
         ctrlWait = (CtrlWait) UtilsViews.getController("ViewWait");
         ctrlPlay = (CtrlPlay) UtilsViews.getController("ViewPlay");
+        ctrlWinner = (CtrlWinner) UtilsViews.getController("ViewWinner");
+        ctrlResult = (CtrlResult) UtilsViews.getController("ViewResult");
+
+        // Mostrar la vista inicial
+        UtilsViews.setView("ViewConfig");
 
         Scene scene = new Scene(UtilsViews.parentContainer);
         
         stage.setScene(scene);
-        stage.onCloseRequestProperty(); // Call close method when closing window
+        stage.onCloseRequestProperty(); // Llamar metodo close al cerrar ventana
         stage.setTitle("JavaFX");
         stage.setMinWidth(windowWidth);
         stage.setMinHeight(windowHeight);
         stage.show();
 
-        // Add icon only if not Mac
+        // Agregar icono solo si no es Mac
         if (!System.getProperty("os.name").contains("Mac")) {
             Image icon = new Image("file:/icons/icon.png");
             stage.getIcons().add(icon);
@@ -73,7 +84,7 @@ public class Main extends Application {
         if (wsClient != null) {
             wsClient.forceExit();
         }
-        System.exit(1); // Kill all executor services
+        System.exit(1); // Finalizar todos los servicios ejecutores
     }
 
     public static void pauseDuring(long milliseconds, Runnable action) {
@@ -96,7 +107,7 @@ public class Main extends Application {
         ctrlConfig.txtMessage.setTextFill(Color.BLACK);
         ctrlConfig.txtMessage.setText("Connecting ...");
     
-        pauseDuring(1500, () -> { // Give time to show connecting message ...
+        pauseDuring(1500, () -> { // Dar tiempo para mostrar mensaje de conexion
 
             String protocol = ctrlConfig.txtProtocol.getText();
             String host = ctrlConfig.txtHost.getText();
@@ -115,6 +126,9 @@ public class Main extends Application {
         JSONObject msgObj = new JSONObject(response);
         switch (msgObj.getString("type")) {
             case "serverData":
+                // guardar datos del servidor
+                lastServerData = msgObj;
+                
                 clientName = msgObj.getString("clientName");
 
                 JSONArray arrClients = msgObj.getJSONArray("clientsList");
@@ -135,59 +149,110 @@ public class Main extends Application {
                 // Detect pieces that moved to the board (for falling animation)
                 if (objects != null && ctrlPlay != null) {
                     for (GameObject newObj : newObjects) {
-                        // Find if this object existed before
+                        // Buscar si este objeto existia antes
                         GameObject oldObj = objects.stream()
                             .filter(o -> o.id.equals(newObj.id))
                             .findFirst()
                             .orElse(null);
                         
-                        // Only start animation when piece JUST moved from off-board to on-board
-                        if (oldObj != null && oldObj.x > 400 && newObj.x < 400) {
-                            // Piece was placed! Start animation from top of its column
-                            double startY = 50.0; // Top of board (25 grid start + 25 cell center)
-                            double targetY = newObj.y; // Server already set final position
+                        // detectar si una ficha fue colocada en el tablero
+                        // la ficha estaba fuera del tablero (x > 400) y ahora esta dentro (x < 400)
+                        // O la Y cambio significativamente (fue colocada en una columna)
+                        if (oldObj != null) {
+                            boolean wasOffBoard = oldObj.x > 400;
+                            boolean isOnBoard = newObj.x < 400;
+                            boolean positionChanged = Math.abs(oldObj.y - newObj.y) > 5;
                             
-                            ctrlPlay.startFallingAnimation(newObj.id, startY, targetY);
-                            System.out.println("[MAIN] Starting fall animation for " + newObj.id + " from Y=" + startY + " to Y=" + targetY);
+                            // si la ficha paso de fuera a dentro del tablero
+                            if (wasOffBoard && isOnBoard) {
+                                // empezar animacion desde arriba de su columna
+                                double startY = 50.0; // arriba del tablero (25 inicio + 25 centro celda)
+                                double targetY = newObj.y; // posicion final del servidor
+                                
+                                ctrlPlay.startFallingAnimation(newObj.id, startY, targetY);
+                            }
                         }
                     }
                 }
                 
                 objects = newObjects;
 
-                // Update turn info
-                String currentTurn = msgObj.optString("currentTurn", "");
-                if (!currentTurn.isEmpty() && clients.size() > 0) {
-                    ClientData myClient = clients.stream()
-                        .filter(c -> c.name.equals(clientName))
-                        .findFirst()
-                        .orElse(null);
+                // comprobar si hay ganador de ronda o final
+                String roundWinner = msgObj.optString("roundWinner", null);
+                String gameWinner = msgObj.optString("gameWinner", null);
+                
+                String activeView = UtilsViews.getActiveView();
+                
+                if (gameWinner != null && !gameWinner.isEmpty()) {
+                    // hay ganador final, desconectar del servidor y mostrar resultado
+                    if (wsClient != null) {
+                        wsClient.forceExit();
+                        wsClient = null;
+                    }
                     
-                    if (myClient != null && myClient.role != null) {
-                        isMyTurn = myClient.role.equals(currentTurn);
-                        String colorName = currentTurn.equals("R") ? "ROJO" : "AMARILLO";
-                        String turnText;
-                        if (isMyTurn) {
-                            turnText = "TU TURNO (" + colorName + ")";
-                        } else {
-                            turnText = "TURNO: " + colorName;
+                    ctrlResult.updateResultInfo();
+                    if (activeView == null || !activeView.equals("ViewResult")) {
+                        UtilsViews.setViewAnimating("ViewResult");
+                    }
+                } else if (roundWinner != null && !roundWinner.isEmpty()) {
+                    // hay ganador de ronda, ir a vista de winner
+                    ctrlWinner.updateWinnerInfo();
+                    if (activeView == null || !activeView.equals("ViewWinner")) {
+                        UtilsViews.setViewAnimating("ViewWinner");
+                    }
+                } else {
+                    // no hay ganador, continuar juego normal
+                    // si estabamos en vista de winner/result, volver a play
+                    if (activeView != null && (activeView.equals("ViewWinner") || activeView.equals("ViewResult"))) {
+                        // resetear animaciones para la nueva ronda
+                        if (ctrlPlay != null) {
+                            ctrlPlay.resetAnimations();
+                            ctrlPlay.start();
                         }
-                        ctrlPlay.title.setText(turnText);
+                        UtilsViews.setViewAnimating("ViewPlay");
+                    }
+                    
+                    // Actualizar informacion del turno
+                    String currentTurn = msgObj.optString("currentTurn", "");
+                    if (!currentTurn.isEmpty() && clients.size() > 0) {
+                        ClientData myClient = clients.stream()
+                            .filter(c -> c.name.equals(clientName))
+                            .findFirst()
+                            .orElse(null);
+                        
+                        if (myClient != null && myClient.role != null) {
+                            isMyTurn = myClient.role.equals(currentTurn);
+                            String colorName = currentTurn.equals("R") ? "ROJO" : "AMARILLO";
+                            String turnText;
+                            if (isMyTurn) {
+                                turnText = "TU TURNO (" + colorName + ")";
+                            } else {
+                                turnText = "TURNO: " + colorName;
+                            }
+                            // verificar que ctrlPlay existe antes de actualizar
+                            if (ctrlPlay != null && ctrlPlay.title != null) {
+                                ctrlPlay.title.setText(turnText);
+                            }
+                        }
                     }
                 }
 
                 if (clients.size() == 1) {
-
-                    ctrlWait.txtPlayer0.setText(clients.get(0).name);
-
+                    // solo actualizar la lista de espera si estamos en esa vista
+                    if (ctrlWait != null && ctrlWait.txtPlayer0 != null) {
+                        ctrlWait.txtPlayer0.setText(clients.get(0).name);
+                    }
                 } else if (clients.size() > 1) {
-
-                    ctrlWait.txtPlayer0.setText(clients.get(0).name);
-                    ctrlWait.txtPlayer1.setText(clients.get(1).name);
-                    // Don't override turn text here - it's set above
+                    // verificar que ctrlWait existe antes de actualizar
+                    if (ctrlWait != null && ctrlWait.txtPlayer0 != null && ctrlWait.txtPlayer1 != null) {
+                        ctrlWait.txtPlayer0.setText(clients.get(0).name);
+                        ctrlWait.txtPlayer1.setText(clients.get(1).name);
+                    }
+                    // No sobrescribir el texto del turno aqui - ya esta establecido arriba
                 }
                 
-                if (UtilsViews.getActiveView().equals("ViewConfig")) {
+                String activeViewAtEnd = UtilsViews.getActiveView();
+                if (activeViewAtEnd != null && activeViewAtEnd.equals("ViewConfig")) {
                     UtilsViews.setViewAnimating("ViewWait");
                 }
 
@@ -197,16 +262,22 @@ public class Main extends Application {
                 int value = msgObj.getInt("value");
                 String txt = String.valueOf(value);
                 if (value == 5) {
-                    // Reset animations when new game starts (countdown begins at 5)
+                    // Resetear animaciones cuando empieza nuevo juego (cuenta regresiva empieza en 5)
                     if (ctrlPlay != null) {
                         ctrlPlay.resetAnimations();
                     }
                 }
                 if (value == 0) {
+                    // reiniciar el timer de animacion antes de mostrar la vista
+                    if (ctrlPlay != null) {
+                        ctrlPlay.start();
+                    }
                     UtilsViews.setViewAnimating("ViewPlay");
                     txt = "GO";
                 }
-                ctrlWait.txtTitle.setText(txt);
+                if (ctrlWait != null && ctrlWait.txtTitle != null) {
+                    ctrlWait.txtTitle.setText(txt);
+                }
                 break;
         }
     }

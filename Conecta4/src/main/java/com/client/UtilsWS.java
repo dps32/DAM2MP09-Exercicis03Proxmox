@@ -26,6 +26,7 @@ public class UtilsWS {
 
     private UtilsWS(String location) {
         this.location = location;
+        exitRequested.set(false); // resetear el flag de salida
         createNewWebSocketClient();
     }
 
@@ -99,6 +100,11 @@ public class UtilsWS {
     }
 
     public static UtilsWS getSharedInstance(String location) {
+        // si ya existe una instancia pero esta cerrada, crear una nueva
+        if (sharedInstance != null && exitRequested.get()) {
+            sharedInstance = null;
+        }
+        
         if (sharedInstance == null) {
             sharedInstance = new UtilsWS(location);
         }
@@ -146,6 +152,8 @@ public class UtilsWS {
             Thread.currentThread().interrupt();
         } finally {
             scheduler.shutdownNow();
+            // limpiar la instancia compartida para permitir nuevas conexiones
+            sharedInstance = null;
         }
     }
 

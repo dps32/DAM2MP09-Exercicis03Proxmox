@@ -18,7 +18,7 @@ public class UtilsViews {
     public static StackPane parentContainer = new StackPane();
     public static ArrayList<Object> controllers = new ArrayList<>();
 
-    // Add one view to the list
+    // Agregar una vista a la lista
     public static void addView(Class<?> cls, String name, String path) throws Exception {
         
         boolean defaultView = false;
@@ -26,7 +26,7 @@ public class UtilsViews {
         Pane view = loader.load();
         ObservableList<Node> children = parentContainer.getChildren();
 
-        // First view is the default view
+        // La primera vista es la vista por defecto
         if (children.isEmpty()) {
             defaultView = true;
         }
@@ -39,11 +39,11 @@ public class UtilsViews {
         controllers.add(loader.getController());
     }
 
-    // Get controller by view id (viewId)
+    // Obtener controlador por id de vista (viewId)
     public static Object getController(String viewId) {
         int index = 0;
         for (Node n : parentContainer.getChildren()) {
-            if (n.getId().equals(viewId)) {
+            if (n.getId() != null && n.getId().equals(viewId)) {
                 return controllers.get(index);
             }
             index++;
@@ -51,25 +51,25 @@ public class UtilsViews {
         return null;
     }
 
-    // Get name of active view
+    // Obtener nombre de la vista activa
     public static String getActiveView() {
         for (Node n : parentContainer.getChildren()) {
-            if (n.isVisible()) {
+            if (n.isVisible() && n.getId() != null) {
                 return n.getId();
             }
         }
-        return null; // No hi ha cap vista activa
+        return null; // No hay ninguna vista activa
     }
 
-    // Set visible view by its id (viewId)
+    // Establecer vista visible por su id (viewId)
     public static void setView(String viewId) {
 
         ArrayList<Node> list = new ArrayList<>();
         list.addAll(parentContainer.getChildrenUnmodifiable());
 
-        // Show next view, hide others
+        // Mostrar siguiente vista, ocultar otras
         for (Node n : list) {
-            if (n.getId().equals(viewId)) {
+            if (n.getId() != null && n.getId().equals(viewId)) {
                 n.setVisible(true);
                 n.setManaged(true);
             } else {
@@ -78,17 +78,17 @@ public class UtilsViews {
             }
         }
 
-        // Remove focus from buttons
+        // Quitar foco de los botones
         parentContainer.requestFocus();
     }
 
-    // Set visible view by its id (viewId) with an animation
+    // Establecer vista visible por su id (viewId) con animacion
     public static void setViewAnimating(String viewId) {
 
         ArrayList<Node> list = new ArrayList<>();
         list.addAll(parentContainer.getChildrenUnmodifiable());
 
-        // Get current view
+        // Obtener vista actual
         Node curView = null;
         for (Node n : list) {
             if (n.isVisible()) {
@@ -96,11 +96,12 @@ public class UtilsViews {
             }
         }
 
-        if (curView.getId().equals(viewId)) {
-            return; // Do nothing if current view is the same as the next view
+        // verificar si hay una vista actual antes de comparar
+        if (curView != null && curView.getId() != null && curView.getId().equals(viewId)) {
+            return; // No hacer nada si la vista actual es la misma que la siguiente
         }
 
-        // Get nxtView
+        // Obtener siguiente vista
         Node nxtView = null;
         for (Node n : list) {
             if (n.getId().equals(viewId)) {
@@ -108,11 +109,30 @@ public class UtilsViews {
             }
         }
 
-        // Set nxtView visible
+        // verificar que la siguiente vista existe
+        if (nxtView == null) {
+            System.err.println("Error: View with id '" + viewId + "' not found");
+            return;
+        }
+
+        // Establecer siguiente vista como visible
         nxtView.setVisible(true);
         nxtView.setManaged(true);
 
-        // By default, set animation to the left
+        // si no hay vista actual, simplemente mostrar la nueva sin animacion
+        if (curView == null) {
+            // ocultar todas las demas vistas
+            for (Node n : list) {
+                if (!n.getId().equals(viewId)) {
+                    n.setVisible(false);
+                    n.setManaged(false);
+                }
+            }
+            parentContainer.requestFocus();
+            return;
+        }
+
+        // Por defecto, establecer animacion hacia la izquierda
         double width = parentContainer.getScene().getWidth();
         double xLeftStart = 0;
         double xLeftEnd = 0;

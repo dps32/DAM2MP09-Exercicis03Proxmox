@@ -53,6 +53,8 @@ public class Main extends WebSocketServer {
     private static final String T_CLIENT_OBJECT_MOVING = "clientObjectMoving";
     private static final String T_CLIENT_PIECE_MOVING = "clientPieceMoving";
     private static final String T_CLIENT_PLAY = "clientPlay";
+    private static final String T_CLIENT_CONTINUE_ROUND = "clientContinueRound";
+    private static final String T_CLIENT_REMATCH = "clientRematch";
     private static final String T_SERVER_DATA = "serverData";
     private static final String T_COUNTDOWN = "countdown";
 
@@ -75,6 +77,16 @@ public class Main extends WebSocketServer {
     // tablero del conecta 4
     private final String[][] board = new String[6][7]; // 6 filas x 7 columnas
     private String currentTurn = "R"; // de quien es el turno (R o Y)
+    
+    // puntuacion de cada jugador
+    private int scoreR = 0; // victorias del rojo
+    private int scoreY = 0; // victorias del amarillo
+    
+    // ganador de la ronda actual
+    private String roundWinner = null; // "R", "Y" o null
+    
+    // ganador final (quien llega a 3)
+    private String gameWinner = null; // "R", "Y" o null
     
     // posicion y tamaño del tablero
     private static final double GRID_START_X = 25;
@@ -142,9 +154,85 @@ public class Main extends WebSocketServer {
         // empezar con rojo
         currentTurn = "R";
         
+        // limpiar ganador de ronda
+        roundWinner = null;
+        
         // volver a poner las fichas en su sitio
         gameObjects.clear();
         initializegameObjects();
+    }
+    
+    // reiniciar puntuacion completa
+    private synchronized void resetScores() {
+        scoreR = 0;
+        scoreY = 0;
+        gameWinner = null;
+        resetGame();
+    }
+    
+    // comprobar si hay 4 en linea
+    private boolean checkWinner(int row, int col, String player) {
+        // horizontal
+        int count = 0;
+        for (int c = 0; c < GRID_COLS; c++) {
+            if (board[row][c].equals(player)) {
+                count++;
+                if (count >= 4) {
+                    return true;
+                }
+            } else {
+                count = 0;
+            }
+        }
+        
+        // vertical
+        count = 0;
+        for (int r = 0; r < GRID_ROWS; r++) {
+            if (board[r][col].equals(player)) {
+                count++;
+                if (count >= 4) {
+                    return true;
+                }
+            } else {
+                count = 0;
+            }
+        }
+        
+        // diagonal \ (arriba-izq a abajo-der)
+        count = 0;
+        int startRow = row - Math.min(row, col);
+        int startCol = col - Math.min(row, col);
+        while (startRow < GRID_ROWS && startCol < GRID_COLS) {
+            if (board[startRow][startCol].equals(player)) {
+                count++;
+                if (count >= 4) {
+                    return true;
+                }
+            } else {
+                count = 0;
+            }
+            startRow++;
+            startCol++;
+        }
+        
+        // diagonal / (abajo-izq a arriba-der)
+        count = 0;
+        startRow = row + Math.min(GRID_ROWS - 1 - row, col);
+        startCol = col - Math.min(GRID_ROWS - 1 - row, col);
+        while (startRow >= 0 && startCol < GRID_COLS) {
+            if (board[startRow][startCol].equals(player)) {
+                count++;
+                if (count >= 4) {
+                    return true;
+                }
+            } else {
+                count = 0;
+            }
+            startRow--;
+            startCol++;
+        }
+        
+        return false;
     }
 
     // procesar una jugada
@@ -179,6 +267,7 @@ public class Main extends WebSocketServer {
             return false;
         }
 
+
         // poner la ficha en el tablero
         board[targetRow][column] = client.role;
         
@@ -194,6 +283,29 @@ public class Main extends WebSocketServer {
             piece.y = gridY;
         } else {
             return false;
+        }
+        
+        // comprobar si hay ganador
+        if (checkWinner(targetRow, column, client.role)) {
+            // hay ganador esta ronda
+            roundWinner = client.role;
+            
+            // sumar punto
+            if (client.role.equals("R")) {
+                scoreR++;
+            } else {
+                scoreY++;
+            }
+            
+            // ver si ha ganado la partida (solo necesita 1 ronda)
+            if (scoreR >= 1) {
+                gameWinner = "R";
+            } else if (scoreY >= 1) {
+                gameWinner = "Y";
+            }
+            
+            // no cambiar turno, la ronda acabo
+            return true;
         }
 
         // cambiar el turno
@@ -296,7 +408,17 @@ public class Main extends WebSocketServer {
         JSONObject rst = msg(T_SERVER_DATA)
                         .put(K_CLIENTS_LIST, arrClients)
                         .put(K_OBJECTS_LIST, arrObjects)
-                        .put("currentTurn", currentTurn);
+                        .put("currentTurn", currentTurn)
+                        .put("scoreR", scoreR)
+                        .put("scoreY", scoreY);
+        
+        // añadir ganadores si existen
+        if (roundWinner != null) {
+            rst.put("roundWinner", roundWinner);
+        }
+        if (gameWinner != null) {
+            rst.put("gameWinner", gameWinner);
+        }
 
         for (Map.Entry<WebSocket, String> e : clients.snapshot().entrySet()) {
             WebSocket conn = e.getKey();
@@ -333,12 +455,20 @@ public class Main extends WebSocketServer {
         sendCountdown();
     }
 
-    /** Elimina el client del registre i envia l’STATE complet. */
+    /** Elimina el client del registre i envia l'STATE complet. */
     @Override
     public void onClose(WebSocket conn, int code, String reason, boolean remote) {
         String name = clients.remove(conn);
         clientsData.remove(name);
         System.out.println("WebSocket client disconnected: " + name);
+        
+        // si queda menos de 2 jugadores, resetear el juego completo
+        if (clientsData.size() < 2) {
+            resetScores();
+            System.out.println("[SERVER] Game reset - less than 2 players");
+            // notificar al cliente restante (si existe) del nuevo estado
+            broadcastStatus();
+        }
     }
 
     /** Processa els missatges rebuts. */
@@ -381,6 +511,16 @@ public class Main extends WebSocketServer {
             int column = obj.optInt("column", -1);
             String pieceId = obj.optString("pieceId", "");
             processPlay(clientName, column, pieceId);
+            
+        } else if (type.equals(T_CLIENT_CONTINUE_ROUND)) {
+            // continuar a la siguiente ronda
+            resetGame();
+            broadcastStatus(); // enviar el nuevo estado a todos
+            
+        } else if (type.equals(T_CLIENT_REMATCH)) {
+            // revancha completa
+            resetScores();
+            broadcastStatus(); // enviar el nuevo estado a todos
         }
     }
 
