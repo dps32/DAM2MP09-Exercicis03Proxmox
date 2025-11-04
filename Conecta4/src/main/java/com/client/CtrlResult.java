@@ -48,12 +48,15 @@ public class CtrlResult implements Initializable {
         int scoreR = serverData.optInt("scoreR", 0);
         int scoreY = serverData.optInt("scoreY", 0);
 
-        // buscar el nombre del ganador
+        // buscar el nombre del ganador en la lista de clientes
         String winnerName = "";
-        if (gameWinner.equals("R")) {
-            winnerName = "Charizard"; // nombre del jugador rojo
-        } else if (gameWinner.equals("Y")) {
-            winnerName = "Pikachu"; // nombre del jugador amarillo
+        if (Main.clients != null) {
+            for (com.shared.ClientData client : Main.clients) {
+                if (client.role != null && client.role.equals(gameWinner)) {
+                    winnerName = client.name;
+                    break;
+                }
+            }
         }
 
         // mostrar el nombre del ganador
